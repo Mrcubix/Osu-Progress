@@ -131,11 +131,11 @@ namespace Osu_Progress
             songFolder = folders["songs"].ToString();
             var path = toTrueDictionary(bm["path"].ToString());
             var file = path["file"].ToString();
-            var bg = Path.Combine(songFolder, path["full"].ToString());
-            string mapfolder = Path.Combine(songFolder, path["folder"].ToString());
-            string mapPath = Path.Combine(mapfolder, file);
+            var bg = path["bg"].ToString();
+            string mapFolder = Path.Combine(songFolder, path["folder"].ToString());
+            string mapPath = Path.Combine(mapFolder, file);
             string mapFileName = file;
-            string songPath = Path.Combine(mapfolder, path["audio"].ToString());
+            string songPath = Path.Combine(mapFolder, path["audio"].ToString());
 
             // if the max combo acquired by the user during a play increase, then increase actual combo and max combo
             if (hasMaxComboChanged(current_combo)) 
@@ -153,7 +153,7 @@ namespace Osu_Progress
                 Console.WriteLine("Map has been Passed");
                 if (!bool.Parse(deserializedSettings["require_FC"].ToString())) 
                 {
-                    MakeMap(mapFileName, mapPath, songPath, bg, Multiplier);
+                    MakeMap(mapFileName, mapPath, songPath, mapFolder , bg, Multiplier);
                 }
             }
             if (hasFCed(active_mods, time_current, time_full, hits_sliderBreaks, hits_miss)) 
@@ -161,7 +161,7 @@ namespace Osu_Progress
                 Console.WriteLine("Map has been FCed");
                 if (bool.Parse(deserializedSettings["require_FC"].ToString())) 
                 {   
-                    MakeMap(mapFileName, mapPath, songPath, bg, Multiplier);
+                    MakeMap(mapFileName, mapPath, songPath, mapFolder, bg, Multiplier);
                 }
                 saved_combo[0] = 0;
                 saved_combo[1] = 0;
@@ -174,7 +174,7 @@ namespace Osu_Progress
             old_state = state;
             saved_combo[0] = current_combo;
         }
-        static void MakeMap(string mapFileName, string mapPath, string songPath, string bg, float multiplier) 
+        static void MakeMap(string mapFileName, string mapPath, string songPath, string mapFolder, string bg, float multiplier) 
         {   
             Console.WriteLine("Making map...");
             string newMapPath = Path.Combine(songFolder, "Osu!Progress - "+mapFileName.Replace(".osu", ""));
@@ -182,22 +182,23 @@ namespace Osu_Progress
             {
                 Directory.CreateDirectory(newMapPath);
             }
-            File.Copy(bg, Path.Combine(Path.Combine(songFolder, "Osu!Progress - "+mapFileName.Replace(".osu", "")),"axion.jpg"),true);
+            File.Copy(Path.Combine(mapFolder, bg), Path.Combine(Path.Combine(songFolder, "Osu!Progress - "+mapFileName.Replace(".osu", "")),$"{bg}"),true);
 
             List<string> map = File.ReadAllLines(mapPath).ToList();
             // header from 0 to hitObject property
-            List<string> header = map.GetRange(0, getPropertyIndex(map, "HitObjects"));
+            List<string> header = map.GetRange(0, getPropertyIndex(map, "HitObjects")+1);
             header = prepareBeatmapHeader(header, songFolder, mapFileName);
 
             int mapDuration = getLastNotetime(map);
 
-            MakeMP3(multiplier, mapDuration, songPath, Path.Combine(Path.Combine(songFolder, "Osu!Progress - "+mapFileName.Replace(".osu", "")), $"level-{getNextLevel(songFolder, mapFileName)}.mp3"));
-            int newMP3Duration = getSongDuration(Path.Combine(Path.Combine(songFolder, "Osu!Progress - "+mapFileName.Replace(".osu", "")), $"level-{getNextLevel(songFolder, mapFileName)}.mp3")); 
+            MakeMP3(multiplier, mapDuration, songPath, Path.Combine(Path.Combine(songFolder, "Osu!Progress - "+mapFileName.Replace(".osu", "")), $"level{getNextLevel(songFolder, mapFileName)}.mp3"));
+            int newMP3Duration = getSongDuration(Path.Combine(Path.Combine(songFolder, "Osu!Progress - "+mapFileName.Replace(".osu", "")), $"level{getNextLevel(songFolder, mapFileName)}.mp3")); 
 
             List<string> newMap = new List<string>();
             int sectionStart = 0;
             for (float i = multiplier; i >= 1; i--) 
             {
+                Console.WriteLine(sectionStart);
                 if (i == 0) 
                 {
                     int sectionDuration = getSectionDuration(songPath, getSongDuration(songPath));
@@ -252,12 +253,14 @@ namespace Osu_Progress
                     break;      
                 }
             }
+            Console.WriteLine(sectionStart);
             if (multiplier > 0) {
-                int sectionDuration = getSectionDuration(songPath, getSongDuration(songPath), (int)(getSongDuration(songPath)*(1-multiplier)));
+                int sectionDuration = (int)(getSectionDuration(songPath, getSongDuration(songPath)) * 0.5);
+                Console.WriteLine($"sectionDuration = {sectionDuration}");
                 List<string> section = map.GetRange(getPropertyIndex(map, "HitObjects") + 1, (map.Count - 1) - getPropertyIndex(map, "HitObjects"));
                 for (int j = section.Count-1; j >= 0; j--) {
-                    if (!(int.Parse(section[j].Split(",")[2]) > (getSongDuration(songPath) - sectionDuration))) {
-                        section = section.GetRange(j+1, (j+1) - (section.Count-1));
+                    if (!(int.Parse(section[j].Split(",")[2]) > sectionDuration)) {
+                        section = section.GetRange(j+1,(section.Count-1)-j);
                         break;
                     }
                     string[] line = section[j].Split(",");
@@ -274,7 +277,7 @@ namespace Osu_Progress
                     for (int k = 0; k != line.Length; k++) 
                     {   
                         section[j] += line[k];
-                        if (j != line.Length-1) 
+                        if (k != line.Length-1) 
                         {
                         section[j] += ",";
                         }
@@ -355,26 +358,26 @@ namespace Osu_Progress
             for (int i = enumerable.Count-1; i >= 0; i--) {
                 switch(enumerable[i].Split(":")[0]){
                     case "AudioFilename":
-                        enumerable[i] = $"AudioFilename: level-{getNextLevel(songFolder, file)}.mp3";
+                        enumerable[i] = $"AudioFilename: level{getNextLevel(songFolder, file)}.mp3";
                         break;
                     case "Tags":
                         enumerable[i] = "Tags: Osu!Progress level="+nextLevel;
                         break;
                     case "BeatmapID":
-                        enumerable[i] = "";
+                        enumerable[i] = "BeatmapID:0";
                         break;
                     case "BeatmapSetID":
-                        enumerable[i] = "";
+                        enumerable[i] = "BeatmapSetID:-1";
                         break;
                     case "Title":
-                        enumerable[i] = $"Title: Osu!Progress - Long Stream Practice Maps [{diffname}]";
+                        enumerable[i] = $"Title:Osu!Progress - Long Stream Practice Maps [{diffname}]";
                         break;
                     case "TitleUnicode":
-                        enumerable[i] = $"TitleUnicode: Osu!Progress - Long Stream Practice Maps [{diffname}]";
+                        enumerable[i] = $"TitleUnicode:Osu!Progress - Long Stream Practice Maps [{diffname}]";
                         break;
                     case "Version":
                         diffname = enumerable[i].Split(":")[1];
-                        enumerable[i] = $"Version: Level {nextLevel}";
+                        enumerable[i] = $"Version:Level {nextLevel}";
                         break;
                 }
             }
