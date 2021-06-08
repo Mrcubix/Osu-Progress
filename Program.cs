@@ -141,7 +141,7 @@ namespace Osu_Progress
             if (hasMaxComboChanged(current_combo)) 
             {
                 saved_combo[1] = current_combo;
-                Console.WriteLine(current_combo);
+                //Console.WriteLine(current_combo);
             }
             // if the user missed or broke, reset the combo and display "Miss or Break" in console
             if (hasMissedOrBroke(current_combo)) 
@@ -196,6 +196,8 @@ namespace Osu_Progress
 
             List<string> newMap = new List<string>();
             int sectionStart = 0;
+            // TODO:
+            // - find a way to make this process faster (can take several minutes)
             for (float i = multiplier; i >= 1; i--) 
             {
                 Console.WriteLine(sectionStart);
@@ -210,21 +212,8 @@ namespace Osu_Progress
                 {
                     int sectionDuration = 0;
                     List<string> section = map.GetRange(getPropertyIndex(map, "HitObjects") + 1, (map.Count - 1) - getPropertyIndex(map, "HitObjects"));
-                    for (int j = section.Count-1; j >= 0; j--) 
-                    {
-                        if (!string.IsNullOrEmpty(section[j])) 
-                        {
-                            if (!((section[j].Split(",")[3] == "5") | (section[j].Split(",")[3] == "1")))
-                            {
-                                section.RemoveAt(j);
-                            }
-                            else 
-                            {
-                                sectionDuration = getSectionDuration(songPath, int.Parse(section[j].Split(",")[2])+3000);
-                                break;
-                            }
-                        }
-                    }
+                    section = removeEndSliderSpinner(section);
+                    sectionDuration = getSectionDuration(songPath, getLastNotetime(section)+3000);
                     newMap.AddRange(setTimings(section, sectionStart));
                     sectionStart += sectionDuration;
                     break;
@@ -232,22 +221,9 @@ namespace Osu_Progress
                 else
                 {
                     int sectionDuration = 0;
-                    List<string> section = map.GetRange(getPropertyIndex(map, "HitObjects") + 1, (map.Count - 1) - getPropertyIndex(map, "HitObjects"));
-                    for (int j = section.Count-1; j >= 0; j--) 
-                    {
-                        if (!string.IsNullOrEmpty(section[j])) 
-                        {
-                            if (!(section[j].Split(",")[3] == "5") | !(section[j].Split(",")[3] == "1"))
-                            {
-                                section.RemoveAt(j);
-                            }
-                            else 
-                            {
-                                sectionDuration = getSectionDuration(songPath, int.Parse(section[j].Split(",")[2]));
-                                break;
-                            }
-                        }
-                    }
+                    List<string> section = map.GetRange(getPropertyIndex(map, "HitObjects") + 1, (map.Count - 1) - getPropertyIndex(map, "HitObjects")); 
+                    section = removeEndSliderSpinner(section);
+                    sectionDuration = getSectionDuration(songPath, getLastNotetime(section));
                     newMap.AddRange(setTimings(section, sectionStart));
                     sectionStart += sectionDuration;
                     break;      
@@ -293,6 +269,24 @@ namespace Osu_Progress
                     tw.WriteLine(line);
             }
             Console.WriteLine("Done");
+        }
+        static List<string> removeEndSliderSpinner(List<string> section) 
+        {
+            for (int j = section.Count-1; j >= 0; j--) 
+            {
+                if (!string.IsNullOrEmpty(section[j])) 
+                {
+                    if (!((section[j].Split(",")[3] == "5") | (section[j].Split(",")[3] == "1")))
+                    {
+                        section.RemoveAt(j);
+                    }
+                    else 
+                    {
+                        return section;
+                    }
+                }
+            }
+            return section;
         }
         static Dictionary<string, object> toTrueDictionary(string stringtoconvert) 
         {
@@ -469,7 +463,7 @@ namespace Osu_Progress
         }
         static void writeMP3(List<Mp3Frame> frames, string output) 
         {
-            using (var writer = File.Create(output)) 
+            using (var writer = new FileStream(output, FileMode.Create, FileAccess.Write)) 
             {
                 for (int i = 0; i != frames.Count; i++) 
                 {
@@ -489,7 +483,6 @@ namespace Osu_Progress
         }
         static int getSectionDuration(string input, int mapDuration, int startDuration = 0) {
             List<Mp3Frame> frames = new List<Mp3Frame>();
-
             frames = TrimMp3(input, frames, TimeSpan.FromMinutes(startDuration), TimeSpan.FromMilliseconds(mapDuration));
             writeMP3(frames, "section.mp3");
             return getSongDuration("section.mp3");
