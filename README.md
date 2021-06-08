@@ -7,5 +7,6 @@ A websocket will be required to receive the data.
 
 ## TODO:
 
-- Create a new, longer map using the user initial input
+- Increasing length multiplier with each level completed
+- Optional bpm multiplier on section completion?
 - UI?
