@@ -8,6 +8,7 @@ using System.Windows.Forms;
 using System.IO;
 using NAudio.Wave;
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace Osu_Progress
 {
@@ -16,7 +17,6 @@ namespace Osu_Progress
         [System.Runtime.InteropServices.DllImport("kernel32.dll")]
         private static extern bool AllocConsole();
         private static readonly ManualResetEvent ExitEvent = new ManualResetEvent(false);
-        private static int[] saved_combo = new int[2]{0,0};
         private static int old_state = 5;
         private static int state;
         private static string songFolder;
@@ -50,6 +50,9 @@ namespace Osu_Progress
                 client.ReconnectTimeout = TimeSpan.FromSeconds(30);
                 client.ErrorReconnectTimeout = TimeSpan.FromSeconds(30);
 
+                client.ReconnectionHappened.Subscribe(msg => {
+                    Console.WriteLine("Info: Connected to gosumemory.");
+                });
                 client.MessageReceived.Subscribe(msg =>
                 {
                     onMessage(msg);
@@ -130,30 +133,17 @@ namespace Osu_Progress
             var folders = toTrueDictionary(settings["folders"].ToString());
             songFolder = folders["songs"].ToString();
             var path = toTrueDictionary(bm["path"].ToString());
-            var file = path["file"].ToString();
-            var bg = path["bg"].ToString();
+            string mapFileName = path["file"].ToString();
+            string bg = path["bg"].ToString();
             string mapFolder = Path.Combine(songFolder, path["folder"].ToString());
-            string mapPath = Path.Combine(mapFolder, file);
-            string mapFileName = file;
-            string songPath = Path.Combine(mapFolder, path["audio"].ToString());
+            string songFileName = path["audio"].ToString();
 
-            // if the max combo acquired by the user during a play increase, then increase actual combo and max combo
-            if (hasMaxComboChanged(current_combo)) 
-            {
-                saved_combo[1] = current_combo;
-                //Console.WriteLine(current_combo);
-            }
-            // if the user missed or broke, reset the combo and display "Miss or Break" in console
-            if (hasMissedOrBroke(current_combo)) 
-            {
-                Console.WriteLine("Miss or Break");
-            }
             if (hasPassed(active_mods, time_current, time_full)) 
             {
                 Console.WriteLine("Map has been Passed");
                 if (!bool.Parse(deserializedSettings["require_FC"].ToString())) 
                 {
-                    MakeMap(mapFileName, mapPath, songPath, mapFolder , bg, Multiplier);
+                    MakeMap(mapFolder, mapFileName, songFileName, bg, Multiplier);
                 }
             }
             if (hasFCed(active_mods, time_current, time_full, hits_sliderBreaks, hits_miss)) 
@@ -161,43 +151,70 @@ namespace Osu_Progress
                 Console.WriteLine("Map has been FCed");
                 if (bool.Parse(deserializedSettings["require_FC"].ToString())) 
                 {   
-                    MakeMap(mapFileName, mapPath, songPath, mapFolder, bg, Multiplier);
+                    MakeMap(mapFolder, mapFileName, songFileName, bg, Multiplier);
                 }
-                saved_combo[0] = 0;
-                saved_combo[1] = 0;
-            }
-            if (!isPlayingOrWatching(time_firstObj, time_current)) 
-            {
-                saved_combo[0] = 0;
-                saved_combo[1] = 0;
             }
             old_state = state;
-            saved_combo[0] = current_combo;
         }
-        static void MakeMap(string mapFileName, string mapPath, string songPath, string mapFolder, string bg, float multiplier) 
+        static void MakeMap(string mapFolder, string map_fileName, string song_fileName, string bg_fileName, float user_length_multiplier) 
         {   
-            Console.WriteLine("Making map...");
-            string newMapPath = Path.Combine(songFolder, "Osu!Progress - "+mapFileName.Replace(".osu", ""));
-            if (!Directory.Exists(newMapPath)) 
-            {
-                Directory.CreateDirectory(newMapPath);
-            }
-            File.Copy(Path.Combine(mapFolder, bg), Path.Combine(Path.Combine(songFolder, "Osu!Progress - "+mapFileName.Replace(".osu", "")),$"{bg}"),true);
+            string mapPath = Path.Combine(mapFolder, map_fileName);
+            string songPath = Path.Combine(mapFolder, song_fileName);
 
+            int level = 0;
+            int next_level = 1;
+            string new_map_folder;
+            Dictionary<string, string> original_map_info = new Dictionary<string, string>();
+            if (isOsuProgressMap(mapFolder)) 
+            {
+                new_map_folder = mapFolder;
+                original_map_info = getOriginalMapInfo(mapFolder);
+                mapFolder = original_map_info["original_Map_folder"];
+                songPath = Path.Combine(mapFolder, original_map_info["original_Song_fileName"]);
+                mapPath = Path.Combine(mapFolder, original_map_info["original_Map_fileName"]);
+                bg_fileName = original_map_info["original_BG_fileName"];
+                level = int.Parse(original_map_info["level"]);
+                if (level == getCurrentMapLevel(mapPath)) {
+                    next_level = level + 1;
+                }
+            } 
+            else 
+            {
+                new_map_folder = Path.Combine(songFolder, "Osu!Progress - "+map_fileName.Replace(".osu", ""));
+                if (!Directory.Exists(new_map_folder)) 
+                {
+                    Directory.CreateDirectory(new_map_folder);
+                } else {
+                    if (isOsuProgressMap(new_map_folder)) 
+                    {
+                        Console.WriteLine("Info: An Osu!Progress variant of this map already exist.");
+                        return;
+                    }
+                }
+                original_map_info = WriteMapInfo(mapFolder, map_fileName, song_fileName, bg_fileName, new_map_folder);
+            }
+
+            Console.WriteLine("Making map...");
+            // Copy original background to new map
+            File.Copy(Path.Combine(mapFolder, bg_fileName), Path.Combine(new_map_folder,$"{bg_fileName}"),true);
+            // Read all lines of the map and store them line by line in a string array
             List<string> map = File.ReadAllLines(mapPath).ToList();
-            // header from 0 to hitObject property
+            // Store the map header separately in another array (header from 0 to hitObject property)
             List<string> header = map.GetRange(0, getPropertyIndex(map, "HitObjects")+1);
-            header = prepareBeatmapHeader(header, songFolder, mapFileName);
+            // Edit Different variable in this header in preperation for the new map
+            header = prepareBeatmapHeader(header, songFolder, map_fileName, next_level);
 
             int mapDuration = getLastNotetime(map);
+            float multiplier = 1 + next_level*(user_length_multiplier - 1);
+            string new_song_path = Path.Combine(new_map_folder, $"level{next_level}.mp3");
 
-            MakeMP3(multiplier, mapDuration, songPath, Path.Combine(Path.Combine(songFolder, "Osu!Progress - "+mapFileName.Replace(".osu", "")), $"level{getNextLevel(songFolder, mapFileName)}.mp3"));
-            int newMP3Duration = getSongDuration(Path.Combine(Path.Combine(songFolder, "Osu!Progress - "+mapFileName.Replace(".osu", "")), $"level{getNextLevel(songFolder, mapFileName)}.mp3")); 
+            MakeMP3(multiplier, mapDuration, songPath, new_song_path);
+            int newMP3Duration = getSongDuration(new_song_path); 
 
-            List<string> newMap = new List<string>();
-            int sectionStart = 0;
             // TODO:
             // - find a way to make this process faster (can take several minutes)
+            List<string> newMap = new List<string>();
+            int sectionStart = 0;
             for (float i = multiplier; i >= 1; i--) 
             {
                 Console.WriteLine(sectionStart);
@@ -261,14 +278,65 @@ namespace Osu_Progress
                 }
                 newMap.AddRange(section);
             }
-            using (TextWriter tw = new StreamWriter(Path.Combine(Path.Combine(songFolder, "Osu!Progress - "+mapFileName.Replace(".osu", "")), $"Osu!Progress - {mapFileName.Split(".osu")[0]} - level {getNextLevel(songFolder, mapFileName)}.osu"))) 
+            using (TextWriter tw = new StreamWriter(Path.Combine(new_map_folder, $"Osu!Progress - {map_fileName.Split(".osu")[0]} - level {next_level}.osu"))) 
             {
                 foreach (String line in header)
                     tw.WriteLine(line);
                 foreach (String line in newMap)
                     tw.WriteLine(line);
             }
+
+            original_map_info["level"] = next_level.ToString();
+            var serialized_map_info = JsonSerializer.Serialize(original_map_info);
+            File.WriteAllText(Path.Combine(new_map_folder, "original_map_info.json"), serialized_map_info);
+
             Console.WriteLine("Done");
+        }
+        static Boolean isOsuProgressMap(string map_folder) {
+            string original_map_info_path = Path.Combine(map_folder, "original_map_info.json");
+            if (File.Exists(original_map_info_path)) 
+            {
+                var deserialized_content = getOriginalMapInfo(map_folder);
+                if (deserialized_content["generated_by"].ToString() == "Osu!Progress") {
+                    return true;
+                }
+            }
+            return false;
+        }
+        static Dictionary<string, string> WriteMapInfo(string map_folder, string map_fileName, string song_fileName, string bg_fileName, string new_map_folder) {
+            Dictionary<string, string> map_info = new Dictionary<string, string>();
+            map_info.Add("generated_by", "Osu!Progress");
+            map_info.Add("original_Map_folder", map_folder);
+            map_info.Add("original_Map_fileName", map_fileName);
+            map_info.Add("original_Song_fileName", song_fileName);
+            map_info.Add("original_BG_fileName", bg_fileName);
+            map_info.Add("level", "1");
+            var serialized_map_info = JsonSerializer.Serialize(map_info);
+            File.WriteAllText(Path.Combine(new_map_folder, "original_map_info.json"), serialized_map_info);
+            return map_info;
+        }
+        static Dictionary<string, string> getOriginalMapInfo(string map_folder) 
+        {
+            Console.WriteLine(map_folder);
+            string original_map_info_path = Path.Combine(map_folder, "original_map_info.json");
+            string serialized_content;
+            using (var stream = new StreamReader(File.OpenRead(original_map_info_path))) 
+            {
+                serialized_content = stream.ReadToEnd();
+            }
+            var deserialized_content = JsonSerializer.Deserialize<Dictionary<string, string>>(serialized_content);
+            return deserialized_content;
+        }
+        static int? getCurrentMapLevel(string map_path) 
+        {
+            string[] map = File.ReadAllLines(map_path);
+            foreach (var line in map) 
+            {
+                if (line.Contains("Version:")) {
+                    return int.Parse(Regex.Match(line, @"[0-9]+").Groups[0].ToString());
+                }
+            }
+            return null;
         }
         static List<string> removeEndSliderSpinner(List<string> section) 
         {
@@ -293,37 +361,9 @@ namespace Osu_Progress
             Dictionary<string, object> dictionary = JsonSerializer.Deserialize<Dictionary<string, object>>(stringtoconvert);
             return dictionary;
         }
-        static Boolean hasMaxComboChanged(int current_combo) 
-        {
-            if (current_combo > saved_combo[0] & current_combo > saved_combo[1] & state == 2) 
-            {
-                return true;
-            }
-            return false;
-        }
-        static Boolean hasMissedOrBroke(int current_combo) 
-        {
-            if (current_combo == 0 & saved_combo[0] > current_combo & state == 2 & old_state == 2) 
-            {
-                return true;
-            }
-            return false;
-        }
-        static Boolean isPlayingOrWatching(int time_firstObj, int time_current, int time_full = 0) 
-        {
-            if (time_current < time_firstObj | state != 2) 
-            {
-                return false;
-            }
-            if (time_firstObj < time_current & time_current < time_full & state == 2) 
-            {
-                return true;
-            }
-            return false;
-        }
         static Boolean hasPassed(string active_mods, int time_current, int time_full) 
         {
-            if (!active_mods.Contains("NF") & time_current > time_full & old_state == 2 & state == 7) 
+            if ((!active_mods.Contains("NF") | !active_mods.Contains("RX") | !active_mods.Contains("AP") | !active_mods.Contains("SO")) & time_current > time_full & old_state == 2 & state == 7) 
             {
                 return true;
             }
@@ -346,13 +386,12 @@ namespace Osu_Progress
             }
             throw new Exception("The enumerable doesn't contain a valid osu! beatmap");
         }
-        static List<string> prepareBeatmapHeader(List<string> enumerable, string songFolder, string file) {
+        static List<string> prepareBeatmapHeader(List<string> enumerable, string songFolder, string file, int nextLevel) {
             string diffname = "";
-            string nextLevel = getNextLevel(songFolder, file);
             for (int i = enumerable.Count-1; i >= 0; i--) {
                 switch(enumerable[i].Split(":")[0]){
                     case "AudioFilename":
-                        enumerable[i] = $"AudioFilename: level{getNextLevel(songFolder, file)}.mp3";
+                        enumerable[i] = $"AudioFilename: level{nextLevel}.mp3";
                         break;
                     case "Tags":
                         enumerable[i] = "Tags: Osu!Progress level="+nextLevel;
@@ -376,12 +415,6 @@ namespace Osu_Progress
                 }
             }
             return enumerable;
-        }
-        static string getNextLevel(string songFolder, string file) 
-        {
-            string newMapPath = Path.Combine(songFolder, "Osu!Progress - "+file.Replace(".osu", ""));
-            string[] allMaps = Directory.GetFiles(newMapPath, "*.osu");
-            return (allMaps.Length+1).ToString();
         }
         static List<string> setTimings(List<string> section, int sectionStart) 
         {
@@ -470,16 +503,6 @@ namespace Osu_Progress
                     writer.Write(frames[i].RawData,0,frames[i].RawData.Length);
                 }
             }
-        }
-        static int getMP3FrameLength(string input) 
-        {
-            using (var writer = File.Create("frame.mp3"))
-            using (var reader = new Mp3FileReader(input)) 
-            {
-                Mp3Frame frame = reader.ReadNextFrame();
-                writer.Write(frame.RawData,0,frame.RawData.Length);
-            }
-            return getSongDuration("frame.mp3");
         }
         static int getSectionDuration(string input, int mapDuration, int startDuration = 0) {
             List<Mp3Frame> frames = new List<Mp3Frame>();
