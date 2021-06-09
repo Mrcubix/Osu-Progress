@@ -205,7 +205,8 @@ namespace Osu_Progress
             header = prepareBeatmapHeader(header, songFolder, map_fileName, next_level);
 
             int mapDuration = getLastNotetime(map);
-            float multiplier = 1 + next_level*(user_length_multiplier - 1);
+            float length_modifier = user_length_multiplier - 1;
+            float multiplier = 1 + next_level * length_modifier;
             string new_song_path = Path.Combine(new_map_folder, $"level{next_level}.mp3");
 
             MakeMP3(multiplier, mapDuration, songPath, new_song_path);
@@ -218,12 +219,14 @@ namespace Osu_Progress
             for (float i = multiplier; i >= 1; i--) 
             {
                 Console.WriteLine(sectionStart);
+                multiplier--;
                 if (i == 0) 
                 {
                     int sectionDuration = getSectionDuration(songPath, getSongDuration(songPath));
                     List<string> section = map.GetRange(getPropertyIndex(map, "HitObjects") + 1, (map.Count - 1) - getPropertyIndex(map, "HitObjects"));
-                    newMap.AddRange(setTimings(section, sectionStart));
+                    newMap.AddRange(setTimingsBeforeEnd(section, sectionStart));
                     sectionStart += sectionDuration;
+                    break;
                 }
                 if (i-1 < 1 & i != 0) 
                 {
@@ -231,7 +234,7 @@ namespace Osu_Progress
                     List<string> section = map.GetRange(getPropertyIndex(map, "HitObjects") + 1, (map.Count - 1) - getPropertyIndex(map, "HitObjects"));
                     section = removeEndSliderSpinner(section);
                     sectionDuration = getSectionDuration(songPath, getLastNotetime(section)+3000);
-                    newMap.AddRange(setTimings(section, sectionStart));
+                    newMap.AddRange(setTimingsBeforeEnd(section, sectionStart));
                     sectionStart += sectionDuration;
                     break;
                 }
@@ -241,41 +244,15 @@ namespace Osu_Progress
                     List<string> section = map.GetRange(getPropertyIndex(map, "HitObjects") + 1, (map.Count - 1) - getPropertyIndex(map, "HitObjects")); 
                     section = removeEndSliderSpinner(section);
                     sectionDuration = getSectionDuration(songPath, getLastNotetime(section));
-                    newMap.AddRange(setTimings(section, sectionStart));
+                    newMap.AddRange(setTimingsBeforeEnd(section, sectionStart));
                     sectionStart += sectionDuration;
                     break;      
                 }
             }
             Console.WriteLine(sectionStart);
             if (multiplier > 0) {
-                int sectionDuration = (int)(getSectionDuration(songPath, getSongDuration(songPath)) * 0.5);
-                Console.WriteLine($"sectionDuration = {sectionDuration}");
                 List<string> section = map.GetRange(getPropertyIndex(map, "HitObjects") + 1, (map.Count - 1) - getPropertyIndex(map, "HitObjects"));
-                for (int j = section.Count-1; j >= 0; j--) {
-                    if (!(int.Parse(section[j].Split(",")[2]) > sectionDuration)) {
-                        section = section.GetRange(j+1,(section.Count-1)-j);
-                        break;
-                    }
-                    string[] line = section[j].Split(",");
-                    if (line[3] == "12") 
-                    {
-                        line[2] = $"{newMP3Duration - (getSongDuration(songPath) - int.Parse(line[2]))}";
-                        line[5] = $"{newMP3Duration - (getSongDuration(songPath) - int.Parse(line[5]))}";
-                    }
-                    else
-                    {
-                        line[2] = $"{newMP3Duration - (getSongDuration(songPath) - int.Parse(line[2]))}";
-                    }
-                    section[j] = "";
-                    for (int k = 0; k != line.Length; k++) 
-                    {   
-                        section[j] += line[k];
-                        if (k != line.Length-1) 
-                        {
-                        section[j] += ",";
-                        }
-                    } 
-                }
+                section = setTimingEnding(section, songPath, newMP3Duration, multiplier);
                 newMap.AddRange(section);
             }
             using (TextWriter tw = new StreamWriter(Path.Combine(new_map_folder, $"Osu!Progress - {map_fileName.Split(".osu")[0]} - level {next_level}.osu"))) 
@@ -416,7 +393,7 @@ namespace Osu_Progress
             }
             return enumerable;
         }
-        static List<string> setTimings(List<string> section, int sectionStart) 
+        static List<string> setTimingsBeforeEnd(List<string> section, int sectionStart) 
         {
             for (int line = 0; line != section.Count; line++)
             {
@@ -440,6 +417,36 @@ namespace Osu_Progress
                         section[line] += ",";
                     }
                 }
+            }
+            return section;
+        }
+        static List<string> setTimingEnding(List<string> section, string songPath, int newMP3Duration, float multiplier) {
+            int sectionDuration = (int)(getSectionDuration(songPath, getSongDuration(songPath)) * multiplier);
+            for (int j = section.Count-1; j >= 0; j--) 
+            {
+                if (!(int.Parse(section[j].Split(",")[2]) > sectionDuration)) {
+                    section = section.GetRange(j+1,(section.Count-1)-j);
+                    break;
+                }
+                string[] line = section[j].Split(",");
+                if (line[3] == "12") 
+                {
+                    line[2] = $"{newMP3Duration - (getSongDuration(songPath) - int.Parse(line[2]))}";
+                    line[5] = $"{newMP3Duration - (getSongDuration(songPath) - int.Parse(line[5]))}";
+                }
+                else
+                {
+                    line[2] = $"{newMP3Duration - (getSongDuration(songPath) - int.Parse(line[2]))}";
+                }
+                section[j] = "";
+                for (int k = 0; k != line.Length; k++) 
+                {   
+                    section[j] += line[k];
+                    if (k != line.Length-1) 
+                    {
+                    section[j] += ",";
+                    }
+                } 
             }
             return section;
         }
