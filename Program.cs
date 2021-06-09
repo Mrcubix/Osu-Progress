@@ -206,7 +206,7 @@ namespace Osu_Progress
 
             int mapDuration = getLastNotetime(map);
             float length_modifier = user_length_multiplier - 1;
-            float multiplier = 1 + next_level * length_modifier;
+            float multiplier = 1 + (next_level * length_modifier);
             string new_song_path = Path.Combine(new_map_folder, $"level{next_level}.mp3");
 
             MakeMP3(multiplier, mapDuration, songPath, new_song_path);
